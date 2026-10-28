@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>School Docs Assistant</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">📚</span>
+      <div>
+        <h1>School Docs Assistant</h1>
+        <p class="tagline">Answers from your school's documents, with sources.</p>
+      </div>
+    </div>
+    <span id="provider-badge" class="badge" title="Active model provider">…</span>
+  </header>
+
+  <main class="layout">
+    <aside class="panel docs-panel">
+      <h2>Documents</h2>
+      <form id="upload-form" class="dropzone">
+        <input id="file-input" type="file" accept=".pdf,.txt,.md" multiple />
+        <label for="file-input">
+          <strong>Choose files</strong> or drop them here
+          <small>PDF, TXT or MD · up to 10 MB</small>
+        </label>
+      </form>
+      <div id="upload-status" class="status" role="status"></div>
+      <ul id="doc-list" class="doc-list"></ul>
+      <p id="doc-empty" class="muted">No documents yet. Upload one to get started.</p>
+    </aside>
+
+    <section class="panel chat-panel">
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="msg bot">
+          <div class="bubble">
+            Hi! Ask me anything about the uploaded school documents, for example
+            <em>"What is the late fee?"</em> or <em>"When do winter holidays start?"</em>
+          </div>
+        </div>
+      </div>
+      <div id="suggestions" class="suggestions"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="question" type="text" placeholder="Ask a question about the documents…"
+               autocomplete="off" maxlength="2000" required />
+        <button type="submit" id="send-btn">Ask</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

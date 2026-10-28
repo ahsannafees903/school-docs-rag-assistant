@@ -1,0 +1,33 @@
+# Default: app + a local Ollama server.
+#   docker compose up -d
+#   docker compose exec ollama ollama pull llama3
+#   docker compose exec ollama ollama pull nomic-embed-text
+# OpenAI instead: set PROVIDER=openai and OPENAI_API_KEY in .env, then
+#   docker compose up -d app
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PROVIDER: ${PROVIDER:-ollama}
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATA_DIR: /data
+    volumes:
+      - app-data:/data
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  app-data:
+  ollama-models:

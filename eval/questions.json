@@ -1,0 +1,29 @@
+{
+  "description": "Retrieval eval set for sample_docs/. 'expected_source' is the file that contains the answer; null means the answer is NOT in the documents and the assistant should refuse.",
+  "cases": [
+    {"question": "When do admissions open for 2026-27?", "expected_source": "admission_policy.md"},
+    {"question": "How old must a child be for Kindergarten?", "expected_source": "admission_policy.md"},
+    {"question": "Which documents do parents need to submit with the admission form?", "expected_source": "admission_policy.md"},
+    {"question": "Is there an entrance test for Grade 4?", "expected_source": "admission_policy.md"},
+    {"question": "Do siblings of current students get priority in admission?", "expected_source": "admission_policy.md"},
+    {"question": "How many days do I have to confirm an admission offer?", "expected_source": "admission_policy.md"},
+    {"question": "What is the late fee if tuition is paid after the 10th?", "expected_source": "fee_structure_2026-27.pdf", "expected_page": 2},
+    {"question": "How much is the monthly tuition for Grade 7?", "expected_source": "fee_structure_2026-27.pdf", "expected_page": 1},
+    {"question": "Is the admission fee refundable?", "expected_source": "fee_structure_2026-27.pdf", "expected_page": 2},
+    {"question": "What discount does the second child get?", "expected_source": "fee_structure_2026-27.pdf", "expected_page": 2},
+    {"question": "How much is the security deposit?", "expected_source": "fee_structure_2026-27.pdf", "expected_page": 1},
+    {"question": "What attendance is required to sit the terminal examination?", "expected_source": "exam_rules.md"},
+    {"question": "Can students bring calculators into the exam?", "expected_source": "exam_rules.md"},
+    {"question": "What happens if a student is caught cheating?", "expected_source": "exam_rules.md"},
+    {"question": "How late can a student arrive to an exam paper?", "expected_source": "exam_rules.md"},
+    {"question": "How much does rechecking a paper cost?", "expected_source": "exam_rules.md"},
+    {"question": "When does the winter break start?", "expected_source": "holiday_calendar_2026-27.txt"},
+    {"question": "When does the academic year begin?", "expected_source": "holiday_calendar_2026-27.txt"},
+    {"question": "Is school closed on Pakistan Day?", "expected_source": "holiday_calendar_2026-27.txt"},
+    {"question": "When are parent-teacher meetings held?", "expected_source": "holiday_calendar_2026-27.txt"},
+    {"question": "Who won the football world cup in 2022?", "expected_source": null},
+    {"question": "What is the capital of Australia?", "expected_source": null},
+    {"question": "What is the principal's phone number?", "expected_source": null},
+    {"question": "Does the cafeteria serve vegetarian lunch?", "expected_source": null}
+  ]
+}
