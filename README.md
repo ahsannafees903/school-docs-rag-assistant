@@ -28,9 +28,11 @@ so instead of making something up.
 - **Answers with citations:** document name, page number (for PDFs), snippet and similarity score.
 - **Grounded by design.** Below a similarity threshold the assistant refuses *before*
   calling the LLM, and the system prompt forbids going beyond the retrieved context.
-- **Pluggable models:** run fully local with **Ollama** (`llama3` + `nomic-embed-text`) or use
-  **OpenAI** (`gpt-4o-mini` + `text-embedding-3-small`), chosen with one env var.
-- **Offline fake provider** so the whole test suite and CI run with no API keys or network.
+- **Runs fully local.** Default models are Ollama **`llama3.2:3b`** (chat) and
+  **`nomic-embed-text`** (embeddings). No paid API key. On a 16 GB RAM machine you can
+  switch the chat model to `llama3.1:8b`.
+- **Offline fake provider** so the whole test suite and CI run with no Ollama process,
+  no API key and no network.
 - **FAISS vector index + SQLite metadata**, persisted to disk; deleting a document removes exactly its vectors.
 - **One JSON envelope for every response**, errors included ([API standards](docs/API_STANDARDS.md)).
 - **Single-page chat UI** (plain HTML/JS, no build step) with drag-and-drop upload.
@@ -46,7 +48,7 @@ flowchart LR
     S --> T{best score ≥ MIN_SCORE?}
     T -- no --> R["'Not in the documents'<br/>(LLM not called)"]
     T -- yes --> P[Grounded prompt with numbered chunks]
-    P --> L[LLM: Ollama / OpenAI]
+    P --> L[LLM: local Ollama llama3.2]
     L --> A[Answer + cited sources]
 
     U[Upload PDF/TXT/MD] --> X[Extract text per page]
@@ -73,41 +75,68 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-### Option A: local models with Ollama (free, private)
+## Runs fully local, no paid API key
+
+The default provider is Ollama on your machine. Copying `.env.example` does not ask for
+an API key, and the running app does not send one. `PROVIDER=openai` is deprecated.
+
+1. Install [Ollama](https://ollama.com) and leave it running (`ollama serve` if it is not already).
+2. Pull the two models the defaults expect:
 
 ```bash
-# install Ollama from https://ollama.com, then:
-ollama pull llama3
+ollama pull llama3.2:3b
 ollama pull nomic-embed-text
-# .env: PROVIDER=ollama
 ```
 
-### Option B: OpenAI
+On a machine with **16 GB of RAM** you can use a stronger chat model instead. Embeddings stay the same:
 
 ```bash
-# .env: PROVIDER=openai and OPENAI_API_KEY=sk-...
+ollama pull llama3.1:8b
+# in .env: OLLAMA_CHAT_MODEL=llama3.1:8b
 ```
 
-### Option C: try it offline in 10 seconds
-
-```bash
-# .env: PROVIDER=fake   (no model needed; lexical search + extractive answers)
-```
-
-### Run
+3. Ingest the four sample school documents and start the API (`.env` already has `PROVIDER=ollama`):
 
 ```bash
 python scripts/ingest_samples.py                 # load the 4 sample school documents
 uvicorn app.main:create_app --factory --reload   # open http://localhost:8000
 ```
 
+4. Ask something the sample docs actually contain. Open http://localhost:8000 or:
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is the late fee if tuition is paid after the 10th?"}'
+```
+
+Other questions to try:
+
+- Which documents do I need for admission?
+- When does winter break start?
+- What attendance is required to sit an exam?
+
+A question that is not in the documents (for example "What is the school bus route?") should
+be refused before the model is called.
+
 Interactive API docs: http://localhost:8000/docs
+
+Step-by-step of what happens after the question is sent: [NOTES.md](NOTES.md).
+
+### Tests and CI (no Ollama)
+
+Pytest forces the offline `fake` provider and does not read your `.env`, so you can run
+the suite on a machine with no model server:
+
+```bash
+pytest -q
+```
 
 ### Docker
 
 ```bash
-docker compose up -d                                   # app + Ollama
-docker compose exec ollama ollama pull llama3
+docker compose up -d                                          # app + Ollama
+docker compose exec ollama ollama pull llama3.2:3b
 docker compose exec ollama ollama pull nomic-embed-text
 ```
 
@@ -175,12 +204,13 @@ Set in `.env` (see [`.env.example`](.env.example)):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PROVIDER` | `fake` | `fake`, `ollama` or `openai` |
-| `OPENAI_API_KEY` | (empty) | Required for `openai` |
+| `PROVIDER` | `ollama` | `ollama` (default, local) or `fake` (tests/CI). `openai` is deprecated |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
+| `OLLAMA_CHAT_MODEL` | `llama3.2:3b` | Local chat model. `llama3.1:8b` if you have 16 GB RAM |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Local embedding model |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `400` / `80` | Characters per chunk / overlap |
 | `TOP_K` | `4` | Chunks retrieved per question |
-| `MIN_SCORE` | provider default | Cosine threshold below which the assistant refuses |
+| `MIN_SCORE` | provider default | Cosine threshold below which the assistant refuses (`ollama` 0.45, `fake` 0.15) |
 | `DATA_DIR` | `data` | Where `index.faiss` and `metadata.db` live |
 | `MAX_UPLOAD_MB` | `10` | Upload size limit |
 
@@ -190,18 +220,20 @@ Set in `.env` (see [`.env.example`](.env.example)):
 app/
   main.py            FastAPI app factory, routes, request logging
   envelope.py        JSON envelope + exception handlers
-  config.py          Settings (pydantic-settings)
+  config.py          Settings (pydantic-settings); default provider is Ollama
   ingestion.py       Text extraction and chunking
   store.py           SQLite metadata + FAISS index
   rag.py             Ingest / retrieve / grounded answer
   prompts.py         System prompt and context formatting
-  providers/         base interfaces, fake, ollama, openai
+  providers/         base interfaces, fake (tests), ollama (default); openai is deprecated
   static/            Chat UI (HTML/CSS/JS)
 sample_docs/         4 fictional school documents (MD, TXT, 2-page PDF)
 scripts/             ingest_samples.py, eval.py, simple_pdf.py, build_sample_pdf.py
 eval/questions.json  24 eval questions (20 answerable, 4 out-of-scope)
-tests/               pytest suite (runs offline)
-docs/                architecture, API standards, decisions, screenshot
+tests/               pytest suite (offline fake provider; does not start Ollama)
+leetcode/            small interview solutions (two-sum.py)
+docs/                architecture, API standards, decisions, session notes
+NOTES.md             pipeline, one step at a time, with a why for each step
 ```
 
 ## 🧪 Testing
@@ -211,11 +243,12 @@ ruff check . && ruff format --check .
 pytest -q
 ```
 
-58 tests cover chunking, PDF/TXT/MD ingestion, persistence across restarts, deletion,
+Tests cover chunking, PDF/TXT/MD ingestion, persistence across restarts, deletion,
 retrieval ranking and page numbers, grounding and refusal (including "the LLM is never
-called below the threshold"), the Ollama and OpenAI clients against mocked HTTP, and the
+called below the threshold"), the Ollama client against mocked HTTP, and the
 response envelope on every success and error path.
-None of them need API keys, a running model or network access.
+None of them need a paid API key, a running Ollama, or network access. The suite sets
+`provider="fake"` itself.
 
 ## 📏 Evaluation
 
@@ -235,13 +268,12 @@ Measured result with the **fake** provider (`CHUNK_SIZE=400`, `TOP_K=4`, `MIN_SC
 
 This is a small, hand-written set on a lexical stand-in embedder, so treat it as a regression
 check, not a benchmark. The margin is thin: the weakest answerable question and the
-strongest out-of-scope question both scored 0.132. Run it with `PROVIDER=ollama` or
-`PROVIDER=openai` to tune `MIN_SCORE` for a real embedding model (I haven't published
-numbers for those yet).
+strongest out-of-scope question both scored 0.132. Run it with `PROVIDER=ollama` to tune
+`MIN_SCORE` for `nomic-embed-text` (I haven't published those numbers yet).
 
 ## 🛣️ Roadmap
 
-- [ ] Publish eval numbers for Ollama and OpenAI embeddings
+- [ ] Publish eval numbers for Ollama embeddings (`nomic-embed-text`)
 - [ ] Streaming answers (server-sent events)
 - [ ] Hybrid search (BM25 + vectors) and a re-ranker
 - [ ] OCR for scanned PDFs

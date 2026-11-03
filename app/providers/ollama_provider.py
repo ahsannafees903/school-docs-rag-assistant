@@ -1,4 +1,8 @@
-"""Local models through Ollama (https://ollama.com): llama3 + nomic-embed-text by default."""
+"""Local models through Ollama (https://ollama.com).
+
+Default chat model is ``llama3.2:3b`` (use ``llama3.1:8b`` on a 16 GB RAM machine).
+Default embeddings are ``nomic-embed-text``. No paid API key is used.
+"""
 
 from __future__ import annotations
 

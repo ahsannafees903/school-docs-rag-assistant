@@ -1,4 +1,9 @@
-"""OpenAI embeddings + chat via the REST API (no SDK dependency)."""
+"""Deprecated OpenAI embeddings + chat via the REST API (no SDK dependency).
+
+Not used unless ``PROVIDER=openai``. The default provider is local Ollama, which
+sends no paid API key. Kept so old configs fail with a clear error and the mocked
+HTTP tests still cover this client.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +29,10 @@ class _OpenAIClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not api_key:
-            raise ProviderError("OPENAI_API_KEY is not set. Add it to .env or use PROVIDER=ollama.")
+            raise ProviderError(
+                "OPENAI_API_KEY is not set. PROVIDER=openai is deprecated; "
+                "use PROVIDER=ollama (the default) so no paid API key is required."
+            )
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},

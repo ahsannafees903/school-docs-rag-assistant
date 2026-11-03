@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 from app.config import Settings
 from app.providers.base import ChatProvider, ContextChunk, EmbeddingProvider, Providers
 
@@ -16,6 +18,12 @@ def build_providers(settings: Settings) -> Providers:
 
         embedder, chat = HashingEmbedder(), ExtractiveChat()
     elif settings.provider == "openai":
+        warnings.warn(
+            "PROVIDER=openai is deprecated and is not the default. "
+            "Use local Ollama (PROVIDER=ollama); a normal run sends no paid API key.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from app.providers.openai_provider import build_openai
 
         embedder, chat = build_openai(

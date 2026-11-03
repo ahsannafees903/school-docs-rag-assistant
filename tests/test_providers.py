@@ -83,8 +83,28 @@ def test_openai_auth_error_is_provider_error() -> None:
 
 
 def test_openai_requires_key() -> None:
-    with pytest.raises(ProviderError, match="OPENAI_API_KEY"):
+    with (
+        pytest.warns(DeprecationWarning, match="deprecated"),
+        pytest.raises(ProviderError, match="OPENAI_API_KEY"),
+    ):
         build_providers(Settings(_env_file=None, provider="openai", openai_api_key=""))
+
+
+def test_defaults_are_local_ollama() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.provider == "ollama"
+    assert settings.ollama_chat_model == "llama3.2:3b"
+    assert settings.ollama_embed_model == "nomic-embed-text"
+    # A key in the environment is dropped unless someone opts into the deprecated provider.
+    assert Settings(_env_file=None, openai_api_key="sk-unused").openai_api_key == ""
+    assert Settings(_env_file=None, provider="openai", openai_api_key="sk-test").openai_api_key == (
+        "sk-test"
+    )
+    providers = build_providers(settings)
+    assert isinstance(providers.embedder, OllamaEmbedder)
+    assert isinstance(providers.chat, OllamaChat)
+    assert providers.chat.model == "llama3.2:3b"
+    assert providers.embedder.model == "nomic-embed-text"
 
 
 @pytest.mark.parametrize(("name", "threshold"), [("fake", 0.15), ("ollama", 0.45)])
