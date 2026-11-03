@@ -10,7 +10,8 @@ question in eval/questions.json and reports:
                    "not in the documents" because no chunk passes the threshold
 
 Usage:
-    python scripts/eval.py                    # PROVIDER from .env (fake by default)
+    python scripts/eval.py                    # provider from .env (ollama by default)
+    PROVIDER=fake python scripts/eval.py      # offline; this is what CI runs
     PROVIDER=ollama python scripts/eval.py --top-k 4 --min-score 0.45
     python scripts/eval.py --sweep            # print metrics for a range of thresholds
 """

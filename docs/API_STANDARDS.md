@@ -40,7 +40,7 @@ build JSON by hand.
 | 422  | `EMPTY_DOCUMENT`        | File is empty or has no extractable text (e.g. scanned PDF) |
 | 422  | `VALIDATION_ERROR`      | Missing/invalid fields, blank question, malformed JSON     |
 | 500  | `INDEX_MISMATCH`        | Existing index was built with a different embedding model  |
-| 502  | `PROVIDER_ERROR`        | OpenAI/Ollama unreachable, bad key, model not pulled       |
+| 502  | `PROVIDER_ERROR`        | Ollama unreachable or model not pulled                      |
 | 500  | `INTERNAL_ERROR`        | Anything unexpected (details only in logs)                 |
 
 ## Endpoints

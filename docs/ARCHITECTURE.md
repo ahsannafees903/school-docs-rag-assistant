@@ -22,8 +22,8 @@ flowchart LR
 
     subgraph Providers["Providers (app/providers/)"]
         FAKE["fake<br/>(offline, tests)"]
-        OLL["Ollama<br/>llama3 + nomic-embed-text"]
-        OAI["OpenAI<br/>gpt-4o-mini + text-embedding-3-small"]
+        OLL["Ollama (default)<br/>llama3.2:3b + nomic-embed-text"]
+        OAI["OpenAI (deprecated)<br/>not used by default"]
     end
 
     subgraph Storage["Storage (DATA_DIR)"]
@@ -59,7 +59,7 @@ flowchart LR
 | `app/store.py` | `VectorStore`: SQLite metadata + FAISS `IndexIDMap2(IndexFlatIP)` on disk |
 | `app/rag.py` | `RAGService`: ingest, list, delete, retrieve, answer (grounding logic lives here) |
 | `app/prompts.py` | System prompt and context formatting for real LLMs |
-| `app/providers/` | `EmbeddingProvider` / `ChatProvider` interfaces + fake, Ollama, OpenAI |
+| `app/providers/` | `EmbeddingProvider` / `ChatProvider`. Default is local Ollama. `fake` is for tests. OpenAI is deprecated. |
 | `app/static/` | Single-page UI, no build step |
 | `scripts/` | Sample ingest, retrieval eval, tiny PDF writer for fixtures |
 

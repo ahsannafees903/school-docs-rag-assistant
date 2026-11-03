@@ -51,9 +51,11 @@ similarity in [-1, 1]. That makes `MIN_SCORE` meaningful and comparable across d
 
 ## 5. Provider abstraction (`EmbeddingProvider` + `ChatProvider`)
 - Two tiny ABCs: `embed(texts) -> vectors` and `answer(question, contexts) -> str`.
-- **Why:** the pipeline should not care whether vectors come from OpenAI, a local Ollama
-  model, or a test double. Switching is one env var (`PROVIDER`), and adding e.g. Gemini
-  or a sentence-transformers model is one new file.
+- **Why:** the pipeline should not care whether vectors come from local Ollama or a
+  test double. Switching is one env var (`PROVIDER`).
+- **Default:** `PROVIDER=ollama` with chat model `llama3.2:3b` (or `llama3.1:8b` on a
+  16 GB RAM machine) and embeddings `nomic-embed-text`. A normal run sends no paid API key.
+  `PROVIDER=openai` is deprecated and is not selected unless you set it yourself.
 - Real providers call the REST APIs directly with `httpx` (no vendor SDKs), which keeps
   dependencies small and makes error handling uniform (`ProviderError` → `502`).
 - **Fake provider:** a hashing bag-of-words embedder plus an extractive "LLM" that only
