@@ -36,6 +36,8 @@ The question is embedded with the same model, then FAISS returns the closest chu
 
 **Why:** the language model should see only the passages that might contain the answer, not every document.
 
+Set `RETRIEVAL_MODE=hybrid` to blend that cosine score with a BM25 keyword score (default weight 0.5). The default `vector` mode does not do this. BM25 is good at exact words ("500", "PKR"); the vector score is good at a paraphrase. The blend is a weighted sum so it still sits on a 0–1 scale the refusal threshold can use. Numbers for both modes are in the README.
+
 ### 6. Refusal threshold
 
 If the best chunk scores below `MIN_SCORE` (0.45 for Ollama, unless you set it), the app returns a fixed "not in the documents" message and does not call the LLM.

@@ -7,6 +7,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+from app.bm25 import BM25Index, fuse_scores
 from app.config import Settings
 from app.errors import AppError
 from app.ingestion import SUPPORTED_EXTENSIONS, chunk_pages, extract_pages, validate_filename
@@ -15,6 +16,11 @@ from app.prompts import NOT_FOUND_ANSWER
 from app.providers import Providers, build_providers
 from app.providers.base import ContextChunk
 from app.store import ChunkHit, DocumentRecord, VectorStore
+
+# Hybrid mode reads a wider shortlist from each scorer, then keeps top_k after
+# the blend. A keyword hit just outside the FAISS top-k can still win.
+_HYBRID_POOL_FACTOR = 5
+_HYBRID_POOL_FLOOR = 20
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +96,13 @@ class RAGService:
 
     # ---- question answering ----------------------------------------------------
     def retrieve(self, question: str, top_k: int | None = None) -> list[ChunkHit]:
+        k = top_k or self.settings.top_k
         query_vector = self.providers.embedder.embed([question])[0]
-        return self.store.search(query_vector, top_k or self.settings.top_k)
+        if self.settings.retrieval_mode == "vector":
+            return self.store.search(query_vector, k)
+        return _hybrid_retrieve(
+            self.store, query_vector, question, k, self.settings.hybrid_vector_weight
+        )
 
     def answer(self, question: str, top_k: int | None = None) -> ChatResponse:
         started = time.perf_counter()
@@ -100,7 +111,14 @@ class RAGService:
         best = round(hits[0].score, 3) if hits else None
 
         if not relevant:
-            logger.info("chat_refused", extra={"best_score": best, "min_score": self.min_score})
+            logger.info(
+                "chat_refused",
+                extra={
+                    "best_score": best,
+                    "min_score": self.min_score,
+                    "retrieval_mode": self.settings.retrieval_mode,
+                },
+            )
             return ChatResponse(answer=NOT_FOUND_ANSWER, grounded=False, sources=[])
 
         contexts = [
@@ -115,10 +133,39 @@ class RAGService:
                 "best_score": best,
                 "sources": len(sources),
                 "grounded": grounded,
+                "retrieval_mode": self.settings.retrieval_mode,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             },
         )
         return ChatResponse(answer=answer, grounded=grounded, sources=sources)
+
+
+def _hybrid_retrieve(
+    store: VectorStore,
+    vector: list[float],
+    question: str,
+    top_k: int,
+    vector_weight: float,
+) -> list[ChunkHit]:
+    """FAISS cosine plus BM25, blended, then cut back to ``top_k``."""
+    n = store.vector_count
+    if n == 0:
+        return []
+    pool = min(n, max(top_k * _HYBRID_POOL_FACTOR, min(_HYBRID_POOL_FLOOR, n)))
+    vector_hits = store.search(vector, pool)
+    vector_scores = {hit.chunk_id: hit.score for hit in vector_hits}
+
+    index = BM25Index()
+    index.add_corpus(store.chunk_texts())
+    raw = index.score(question)
+    keyword_ids = sorted(raw, key=lambda chunk_id: (-raw[chunk_id], chunk_id))[:pool]
+    keyword_scores = {chunk_id: raw[chunk_id] for chunk_id in keyword_ids}
+    for chunk_id in vector_scores:
+        if chunk_id in raw:
+            keyword_scores[chunk_id] = raw[chunk_id]
+
+    blended = fuse_scores(vector_scores, keyword_scores, vector_weight)[:top_k]
+    return store.hydrate(blended)
 
 
 def _to_source(hit: ChunkHit) -> Source:

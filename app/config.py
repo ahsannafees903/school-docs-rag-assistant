@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=400, ge=100, le=8000)
     chunk_overlap: int = Field(default=80, ge=0)
     top_k: int = Field(default=4, ge=1, le=20)
+    # vector = FAISS only (default). hybrid = weighted sum of FAISS and BM25.
+    retrieval_mode: Literal["vector", "hybrid"] = "vector"
+    # Share of the hybrid score that comes from FAISS. The rest is BM25.
+    # Used only when retrieval_mode is hybrid. 1.0 ignores keywords.
+    hybrid_vector_weight: float = Field(default=0.5, ge=0.0, le=1.0)
     min_score: float | None = Field(default=None, ge=-1.0, le=1.0)
 
     max_upload_mb: float = Field(default=10, gt=0)

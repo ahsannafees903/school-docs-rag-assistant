@@ -10,10 +10,12 @@ question in eval/questions.json and reports:
                    "not in the documents" because no chunk passes the threshold
 
 Usage:
-    python scripts/eval.py                    # provider from .env (ollama by default)
-    PROVIDER=fake python scripts/eval.py      # offline; this is what CI runs
-    PROVIDER=ollama python scripts/eval.py --top-k 4 --min-score 0.45
-    python scripts/eval.py --sweep            # print metrics for a range of thresholds
+    python scripts/eval.py                         # provider and mode from the environment
+    PROVIDER=fake python scripts/eval.py          # offline; this is what CI runs
+    python scripts/eval.py --provider fake --mode hybrid
+    python scripts/eval.py --provider ollama --mode vector
+    python scripts/eval.py --provider ollama --mode hybrid
+    python scripts/eval.py --sweep                 # hit rate / refusal across thresholds
 """
 
 from __future__ import annotations
@@ -88,17 +90,35 @@ def main() -> None:
     )
     parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--min-score", type=float, default=None)
+    parser.add_argument(
+        "--provider",
+        choices=["fake", "ollama"],
+        default=None,
+        help="offline fake provider, or local Ollama (default: PROVIDER from the environment)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["vector", "hybrid"],
+        default=None,
+        help="vector-only FAISS, or hybrid BM25 + FAISS (default: RETRIEVAL_MODE, which is vector)",
+    )
     parser.add_argument("--sweep", action="store_true")
     parser.add_argument("--json", action="store_true", help="print raw JSON")
     args = parser.parse_args()
 
     cases = json.loads((ROOT / "eval" / "questions.json").read_text())["cases"]
     with tempfile.TemporaryDirectory() as tmp:
-        settings = Settings(data_dir=Path(tmp))
+        overrides: dict = {"data_dir": Path(tmp)}
+        if args.provider:
+            overrides["provider"] = args.provider
+        if args.mode:
+            overrides["retrieval_mode"] = args.mode
+        settings = Settings(**overrides)
         service = RAGService(settings)
         top_k = args.top_k or settings.top_k
         print(
-            f"provider={settings.provider} chunk_size={settings.chunk_size} "
+            f"provider={settings.provider} mode={settings.retrieval_mode} "
+            f"weight={settings.hybrid_vector_weight} chunk_size={settings.chunk_size} "
             f"overlap={settings.chunk_overlap}"
         )
         ingest_folder(service, ROOT / "sample_docs")
@@ -116,6 +136,9 @@ def main() -> None:
 
         min_score = args.min_score if args.min_score is not None else service.min_score
         report = evaluate(service, cases, top_k, min_score)
+        report["provider"] = settings.provider
+        report["retrieval_mode"] = settings.retrieval_mode
+        report["hybrid_vector_weight"] = settings.hybrid_vector_weight
         if args.json:
             print(json.dumps(report, indent=2))
             return

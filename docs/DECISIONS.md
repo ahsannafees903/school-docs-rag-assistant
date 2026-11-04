@@ -76,3 +76,20 @@ Foreign keys + `ON DELETE CASCADE` keep chunks consistent with documents.
 Plain HTML/CSS/JS served by FastAPI keeps the project runnable with `pip install` alone and
 easy to read in a portfolio review. A framework would add tooling without adding value at
 this size.
+
+## 9. Hybrid retrieval is opt-in (BM25 + vectors, weighted sum)
+
+- **Decision:** `RETRIEVAL_MODE=vector` stays the default. `hybrid` blends FAISS cosine
+  with Okapi BM25: clamp cosine to [0, 1], divide BM25 by the best keyword score in
+  the candidate set, then `HYBRID_VECTOR_WEIGHT * cosine + (1 - weight) * bm25`
+  (default weight 0.5). Each side contributes a shortlist wider than `TOP_K`.
+- **Why combine them:** vectors match a paraphrase ("tuition paid late"), BM25 matches
+  the exact token ("500", "PKR", a form name). Either one alone misses a class of questions.
+- **Why a weighted sum, not reciprocal rank fusion:** RRF scores sit near 0.01, so the
+  existing `MIN_SCORE` gate would refuse every question. The weighted sum stays in
+  [0, 1], so the same gate still means "not close enough". The score is no longer raw
+  cosine, so a threshold tuned for vector mode can move hit rate and refusal; measure
+  with `python scripts/eval.py --mode hybrid` before relying on it.
+- **Why the default stays vector:** the published threshold and the tests were built
+  for cosine. Hybrid is one env var when you want it, and turning it off restores the
+  old ranking.
