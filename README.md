@@ -34,6 +34,7 @@ so instead of making something up.
 - **Offline fake provider** so the whole test suite and CI run with no Ollama process,
   no API key and no network.
 - **FAISS vector index + SQLite metadata**, persisted to disk; deleting a document removes exactly its vectors.
+- **Optional hybrid retrieval.** `RETRIEVAL_MODE=hybrid` blends the FAISS score with a BM25 keyword score. The default stays vector-only.
 - **One JSON envelope for every response**, errors included ([API standards](docs/API_STANDARDS.md)).
 - **Single-page chat UI** (plain HTML/JS, no build step) with drag-and-drop upload.
 - **Retrieval eval script** reporting hit rate and refusal rate, plus a threshold sweep.
@@ -210,7 +211,9 @@ Set in `.env` (see [`.env.example`](.env.example)):
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Local embedding model |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `400` / `80` | Characters per chunk / overlap |
 | `TOP_K` | `4` | Chunks retrieved per question |
-| `MIN_SCORE` | provider default | Cosine threshold below which the assistant refuses (`ollama` 0.45, `fake` 0.15) |
+| `RETRIEVAL_MODE` | `vector` | `vector` (FAISS only) or `hybrid` (FAISS + BM25). Default matches the old behavior |
+| `HYBRID_VECTOR_WEIGHT` | `0.5` | In hybrid mode, share of the score that comes from FAISS. The rest is BM25 |
+| `MIN_SCORE` | provider default | Score below which the assistant refuses (`ollama` 0.45, `fake` 0.15). In vector mode this is cosine. In hybrid mode it is the blended score |
 | `DATA_DIR` | `data` | Where `index.faiss` and `metadata.db` live |
 | `MAX_UPLOAD_MB` | `10` | Upload size limit |
 
@@ -223,6 +226,7 @@ app/
   config.py          Settings (pydantic-settings); default provider is Ollama
   ingestion.py       Text extraction and chunking
   store.py           SQLite metadata + FAISS index
+  bm25.py            BM25 keyword scores and the blend with FAISS
   rag.py             Ingest / retrieve / grounded answer
   prompts.py         System prompt and context formatting
   providers/         base interfaces, fake (tests), ollama (default); openai is deprecated
@@ -231,7 +235,7 @@ sample_docs/         4 fictional school documents (MD, TXT, 2-page PDF)
 scripts/             ingest_samples.py, eval.py, simple_pdf.py, build_sample_pdf.py
 eval/questions.json  24 eval questions (20 answerable, 4 out-of-scope)
 tests/               pytest suite (offline fake provider; does not start Ollama)
-leetcode/            small interview solutions (two-sum.py)
+leetcode/            small interview solutions (two-sum.py, valid-anagram.py)
 docs/                architecture, API standards, decisions, session notes
 NOTES.md             pipeline, one step at a time, with a why for each step
 ```
@@ -244,17 +248,19 @@ pytest -q
 ```
 
 Tests cover chunking, PDF/TXT/MD ingestion, persistence across restarts, deletion,
-retrieval ranking and page numbers, grounding and refusal (including "the LLM is never
-called below the threshold"), the Ollama client against mocked HTTP, and the
-response envelope on every success and error path.
+retrieval ranking, BM25 scoring and score fusion, page numbers, grounding and refusal
+(including "the LLM is never called below the threshold"), the Ollama client against
+mocked HTTP, and the response envelope on every success and error path.
 None of them need a paid API key, a running Ollama, or network access. The suite sets
 `provider="fake"` itself.
 
 ## 📏 Evaluation
 
 ```bash
-python scripts/eval.py           # metrics for the configured provider
-python scripts/eval.py --sweep   # hit rate / refusal rate across thresholds
+python scripts/eval.py                              # provider and mode from the environment
+python scripts/eval.py --provider fake --mode vector
+python scripts/eval.py --provider fake --mode hybrid
+python scripts/eval.py --sweep                      # hit rate / refusal across thresholds
 ```
 
 Measured result with the **fake** provider (`CHUNK_SIZE=400`, `TOP_K=4`, `MIN_SCORE=0.15`):
@@ -268,14 +274,61 @@ Measured result with the **fake** provider (`CHUNK_SIZE=400`, `TOP_K=4`, `MIN_SC
 
 This is a small, hand-written set on a lexical stand-in embedder, so treat it as a regression
 check, not a benchmark. The margin is thin: the weakest answerable question and the
-strongest out-of-scope question both scored 0.132. Run it with `PROVIDER=ollama` to tune
-`MIN_SCORE` for `nomic-embed-text` (I haven't published those numbers yet).
+strongest out-of-scope question both scored 0.132. The vector-vs-hybrid comparison is in
+the next section. Ollama numbers are still not published.
+
+## Retrieval: vector vs hybrid
+
+`RETRIEVAL_MODE=vector` (the default) is FAISS cosine only, the same path as before.
+
+`RETRIEVAL_MODE=hybrid` adds BM25. BM25 scores chunks that share the question's words, and a rare word counts more than a word that is in every chunk. The vector score can match a paraphrase, when the words are not the same. The blend is
+
+```text
+score = HYBRID_VECTOR_WEIGHT * clamp(cosine, 0, 1)
+      + (1 - HYBRID_VECTOR_WEIGHT) * (bm25 / best bm25 in the shortlist)
+```
+
+`HYBRID_VECTOR_WEIGHT` defaults to `0.5`. This is a weighted sum, not reciprocal rank fusion: fusion scores sit near `0.01`, so `MIN_SCORE` (0.15 or 0.45) would refuse every question. The weighted sum stays in `[0, 1]`, and the same gate still means "not close enough". It is not raw cosine, so a threshold tuned for vector mode can change hit rate and refusal.
+
+Switch modes in `.env`:
+
+```bash
+RETRIEVAL_MODE=hybrid
+HYBRID_VECTOR_WEIGHT=0.5
+```
+
+Or for one eval run, without editing `.env`:
+
+```bash
+python scripts/eval.py --provider fake --mode vector
+python scripts/eval.py --provider fake --mode hybrid
+python scripts/eval.py --provider ollama --mode vector
+python scripts/eval.py --provider ollama --mode hybrid
+```
+
+Same 24 questions, `CHUNK_SIZE=400`, `TOP_K=4`, hybrid weight `0.5`. A hit counts only when the chunk's score is at least the provider's `MIN_SCORE` (fake: 0.15), which is what a user would be shown. The fake rows were measured in this repo with the offline provider. Ollama was not running here (`connection refused` on `localhost:11434`), so those rows are not numbers.
+
+| Provider | Mode | hit@1 | hit@4 | page hit@4 | refusal |
+|---|---|---|---|---|---|
+| fake (offline) | vector | 95% (19/20) | 95% (19/20) | 80% (4/5) | 100% (4/4) |
+| fake (offline) | hybrid | 100% (20/20) | 100% (20/20) | 100% (5/5) | 75% (3/4) |
+| ollama (`nomic-embed-text`) | vector | run `python scripts/eval.py --provider ollama --mode vector` locally to fill in | — | — | — |
+| ollama (`nomic-embed-text`) | hybrid | run `python scripts/eval.py --provider ollama --mode hybrid` locally to fill in | — | — | — |
+
+What those fake numbers actually were:
+
+- Vector mode missed "When does the academic year begin?" (best cosine 0.132, under 0.15) and returned the security deposit from page 2 of the fee PDF instead of page 1. It refused all 4 out-of-scope questions.
+- Hybrid mode picked up that academic-year line in the holiday calendar, and returned the security deposit from page 1, so hit rate and page hit rate went to 100%.
+- Hybrid also let through "What is the principal's phone number?" (blended score 0.54). That answer is not in the documents. Exam rules say "The Principal" and "phones … are strictly not allowed", so BM25 treats the question as a keyword hit. Vector mode scored it 0.132 and refused.
+
+So on this set, hybrid is better at exact words and worse at staying quiet when those words appear in the wrong rule. The offline embedder is already lexical, so this is not a semantic-search benchmark. Retune `MIN_SCORE` with `python scripts/eval.py --provider fake --mode hybrid --sweep` before using hybrid in front of a parent. The published 0.15 and 0.45 defaults were chosen for cosine.
 
 ## 🛣️ Roadmap
 
 - [ ] Publish eval numbers for Ollama embeddings (`nomic-embed-text`)
 - [ ] Streaming answers (server-sent events)
-- [ ] Hybrid search (BM25 + vectors) and a re-ranker
+- [x] Hybrid search (BM25 + vectors), off unless `RETRIEVAL_MODE=hybrid`
+- [ ] A re-ranker on top of the shortlist
 - [ ] OCR for scanned PDFs
 - [ ] Urdu question support
 - [ ] Per-school collections and simple API-key auth

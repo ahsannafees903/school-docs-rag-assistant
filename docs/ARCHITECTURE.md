@@ -76,6 +76,8 @@ flowchart LR
 
 **Chat** `POST /chat`
 1. Embed the question and search FAISS for `TOP_K` nearest chunks (cosine similarity).
+   With `RETRIEVAL_MODE=hybrid` (off by default), that list is a weighted sum of the
+   cosine score and a BM25 keyword score. `RETRIEVAL_MODE=vector` is FAISS only.
 2. Drop chunks below `MIN_SCORE`. If none remain, return the fixed "not in the documents"
    answer **without calling the LLM** (no tokens spent, no chance to hallucinate).
 3. Otherwise number the chunks `[1]..[n]`, send them with the strict system prompt, and

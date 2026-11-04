@@ -187,6 +187,12 @@ class VectorStore:
     def vector_count(self) -> int:
         return int(self.index.ntotal)
 
+    def chunk_texts(self) -> list[tuple[int, str]]:
+        """Every stored chunk as ``(chunk_id, text)``, for keyword scoring."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id, text FROM chunks").fetchall()
+        return [(int(row["id"]), row["text"]) for row in rows]
+
     def search(self, vector: list[float], top_k: int) -> list[ChunkHit]:
         with self._lock:
             if self.index.ntotal == 0:
@@ -194,30 +200,35 @@ class VectorStore:
             query = _normalize(np.asarray([vector], dtype="float32"))
             scores, ids = self.index.search(query, min(top_k, int(self.index.ntotal)))
         pairs = [(int(i), float(s)) for i, s in zip(ids[0], scores[0], strict=True) if i != -1]
-        if not pairs:
+        return self.hydrate(pairs)
+
+    def hydrate(self, scored: list[tuple[int, float]]) -> list[ChunkHit]:
+        """Turn ``(chunk_id, score)`` pairs into hits, keeping that order."""
+        if not scored:
             return []
-        placeholders = ",".join("?" for _ in pairs)
+        placeholders = ",".join("?" for _ in scored)
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT c.id, c.document_id, c.page, c.text, d.filename FROM chunks c "
                 f"JOIN documents d ON d.id = c.document_id WHERE c.id IN ({placeholders})",
-                [i for i, _ in pairs],
+                [chunk_id for chunk_id, _ in scored],
             ).fetchall()
-        by_id = {r["id"]: r for r in rows}
-        hits = []
-        for chunk_id, score in pairs:
+        by_id = {row["id"]: row for row in rows}
+        hits: list[ChunkHit] = []
+        for chunk_id, score in scored:
             row = by_id.get(chunk_id)
-            if row is not None:
-                hits.append(
-                    ChunkHit(
-                        chunk_id,
-                        row["document_id"],
-                        row["filename"],
-                        row["page"],
-                        row["text"],
-                        score,
-                    )
+            if row is None:
+                continue
+            hits.append(
+                ChunkHit(
+                    chunk_id,
+                    row["document_id"],
+                    row["filename"],
+                    row["page"],
+                    row["text"],
+                    score,
                 )
+            )
         return hits
 
 
