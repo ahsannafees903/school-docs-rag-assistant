@@ -18,6 +18,42 @@ admission policy, fee structure, exam rules and holiday calendar, then ask in pl
 Every answer comes with its sources, and if the documents don't cover the question it says
 so instead of making something up.
 
+## In 60 seconds
+
+Parents ask about fees, admission papers, and holidays. This app answers **only** from the files you upload, cites the file and page, and says it could not find the answer when the match is too weak. It is a small FastAPI service: FAISS for search, SQLite for the text, and **local Ollama** for the model. Tests and CI use an offline fake provider, so they need no model and no API key.
+
+A reviewer can run the same path in under two minutes: [docs/demo.md](docs/demo.md). A recording of the chat UI on that offline provider is [docs/demo.gif](docs/demo.gif).
+
+## Architecture
+
+A question never sees the whole corpus. Ingest turns each file into chunks, those chunks become vectors, and FAISS keeps them. At question time the same embedder searches that index, a score threshold decides whether the local model is allowed to speak, and the response carries the citations.
+
+```mermaid
+flowchart LR
+    ingest["Ingest<br/>PDF, TXT, or MD"] --> chunk["Chunk<br/>400 characters, overlap 80"]
+    chunk --> embed["Embed<br/>local nomic-embed-text"]
+    embed --> faiss[("FAISS<br/>IndexFlatIP")]
+    faiss --> retrieve["Retrieve<br/>top 4 chunks"]
+    retrieve --> threshold{"Best score<br/>at least MIN_SCORE?"}
+    threshold -->|no| refuse["Refusal<br/>the LLM is not called"]
+    threshold -->|yes| llm["LLM<br/>local Ollama llama3.2"]
+    llm --> citations["Citations<br/>file, page, snippet, score"]
+```
+
+The module map (UI, envelope, providers, SQLite) is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). A plain-language walk of the same eight steps is [NOTES.md](NOTES.md).
+
+## Design decisions
+
+Four choices a reviewer usually asks about. The longer write-up, including the chunk-size measurements, is [docs/DECISIONS.md](docs/DECISIONS.md).
+
+**Why a refusal threshold.** If the best chunk scores below `MIN_SCORE`, the API returns a fixed sentence and does not call the model. A made-up fee or date is worse than "I couldn't find that." Skipping the model makes the decision cheap and testable: the suite asserts the chat provider is never called on a weak hit. Defaults are 0.45 for Ollama and 0.15 for the offline fake embedder, because the number depends on the model. On the 24-question fake eval, 0.15 keeps hit@1 at 95% and refuses all 4 out-of-scope questions. Hybrid mode scores a blend, not raw cosine, so that threshold should be swept again before you turn hybrid on.
+
+**Why IndexFlatIP.** A school has thousands of chunks, not millions. Exact inner-product search over that size is milliseconds, so an approximate index (IVF, HNSW) would add knobs and no benefit. Vectors are L2-normalised on the way in, so the inner product **is** cosine similarity and `MIN_SCORE` means the same thing for every file. `IndexIDMap2` uses the SQLite chunk id as the vector id, which means deleting a document removes exactly its vectors. The index is one file on disk. Past roughly a million chunks, or more than one app process, this store should be replaced; the rest of the pipeline would stay.
+
+**Why one JSON envelope.** Success and error responses share one shape: `status`, `data`, and `error`. A client never special-cases a 404 body that looks different from a 200. "Not in the documents" is still `status: success` with `grounded: false`, because the request worked and the corpus simply did not cover it. Routes call `success()`; exception handlers in `app/envelope.py` build every error. Tests check the shape on each path. Details are in [docs/API_STANDARDS.md](docs/API_STANDARDS.md).
+
+**Why Ollama.** The default a person runs should work on a laptop after two `ollama pull` commands, with no paid API key and with the school files staying on that machine. Chat is `llama3.2:3b` (switch to `llama3.1:8b` on 16 GB of RAM). Embeddings are `nomic-embed-text`. A paid API is often a stronger writer and needs no local RAM, and it costs money, needs a key, and sends the retrieved passages off the machine. `PROVIDER=openai` is still in the tree and is deprecated: nothing selects it unless you set it. Pytest forces `PROVIDER=fake`, a deterministic stand-in, so CI does not start Ollama and does not call any API.
+
 ![School Docs Assistant answering a fee question with page-level citations, and refusing an out-of-scope question](docs/screenshot.png)
 <sub>Screenshot taken with the offline `fake` provider, which answers by quoting the retrieved text.</sub>
 
@@ -42,27 +78,9 @@ so instead of making something up.
 
 ## 🏗️ How it works
 
-```mermaid
-flowchart LR
-    Q[Question] --> E[Embed question]
-    E --> S[FAISS top-k search]
-    S --> T{best score ≥ MIN_SCORE?}
-    T -- no --> R["'Not in the documents'<br/>(LLM not called)"]
-    T -- yes --> P[Grounded prompt with numbered chunks]
-    P --> L[LLM: local Ollama llama3.2]
-    L --> A[Answer + cited sources]
+The diagram above is the path from a file to a cited answer. Upload extracts text per page, chunks it (400 characters, 80 of overlap, breaking on a paragraph or sentence), embeds the chunks, and stores vectors in FAISS and the text in SQLite. A question is embedded the same way. Chunks under `MIN_SCORE` are dropped; if none remain, the model is not called. Otherwise the local model writes the sentence and the API attaches the file, page, snippet, and score.
 
-    U[Upload PDF/TXT/MD] --> X[Extract text per page]
-    X --> C[Chunk 400 chars, 80 overlap]
-    C --> V[Embed chunks]
-    V --> F[(FAISS index)]
-    C --> D[(SQLite metadata)]
-    F --> S
-    D --> A
-```
-
-More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · design trade-offs:
-[docs/DECISIONS.md](docs/DECISIONS.md).
+Optional `RETRIEVAL_MODE=hybrid` blends the FAISS score with BM25 before that threshold. The default is vector-only. Numbers for both modes are in [Retrieval: vector vs hybrid](#retrieval-vector-vs-hybrid).
 
 ## 🚀 Quickstart
 
@@ -117,8 +135,9 @@ Other questions to try:
 - When does winter break start?
 - What attendance is required to sit an exam?
 
-A question that is not in the documents (for example "What is the school bus route?") should
-be refused before the model is called.
+A question the documents do not cover, such as "What is the capital of Australia?",
+comes back with `grounded: false` and the model is not called. The exact commands and
+a captured response are in [docs/demo.md](docs/demo.md).
 
 Interactive API docs: http://localhost:8000/docs
 
@@ -235,8 +254,8 @@ sample_docs/         4 fictional school documents (MD, TXT, 2-page PDF)
 scripts/             ingest_samples.py, eval.py, simple_pdf.py, build_sample_pdf.py
 eval/questions.json  24 eval questions (20 answerable, 4 out-of-scope)
 tests/               pytest suite (offline fake provider; does not start Ollama)
-leetcode/            small interview solutions (two-sum.py, valid-anagram.py)
-docs/                architecture, API standards, decisions, session notes
+leetcode/            small interview solutions (two-sum, valid-anagram, contains-duplicate)
+docs/                architecture, API standards, decisions, demo, session notes
 NOTES.md             pipeline, one step at a time, with a why for each step
 ```
 
