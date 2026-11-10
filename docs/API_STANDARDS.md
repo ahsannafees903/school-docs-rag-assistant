@@ -48,7 +48,7 @@ build JSON by hand.
 ### `GET /health`
 ```json
 {"status": "success",
- "data": {"service": "school-docs-assistant", "version": "0.1.0", "provider": "fake", "min_score": 0.15},
+ "data": {"service": "school-docs-assistant", "version": "1.1.0", "provider": "fake", "min_score": 0.15},
  "error": null}
 ```
 

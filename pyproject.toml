@@ -1,6 +1,6 @@
 [project]
 name = "school-docs-rag-assistant"
-version = "0.1.0"
+version = "1.1.0"
 description = "A RAG chatbot that answers questions about school documents and cites its sources."
 readme = "README.md"
 license = { text = "MIT" }
